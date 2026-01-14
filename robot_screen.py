@@ -47,7 +47,7 @@ def display_loop():
 
     # 加载图片 helper
     def load_img(name):
-        path = f"assets/{name}.jpg"
+        path = f"assets/{name}.png"
         try:
             img = pygame.image.load(path)
             return pygame.transform.scale(img, (w, h))
