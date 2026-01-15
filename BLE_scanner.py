@@ -1,6 +1,9 @@
 import asyncio
 from bleak import BleakScanner
 from config import *
+"""
+用于step 1确认target person在哪
+"""
 
 class BLETargetFinder:
     """蓝牙目标定位器"""
@@ -18,7 +21,7 @@ class BLETargetFinder:
             found: bool
             rssi: int (信号强度)
         """
-        print(f"\n🔍 Scanning for BLE device: {TARGET_BLE_NAME}")
+        print(f"\n Scanning for BLE device: {TARGET_BLE_NAME}")
         print(f"   Scan duration: {self.scan_duration}s")
         
         self.target_found = False
@@ -29,7 +32,7 @@ class BLETargetFinder:
                 self.target_found = True
                 if device.rssi > self.best_rssi:
                     self.best_rssi = device.rssi
-                    print(f"   📡 Signal: {device.rssi} dBm")
+                    print(f"   Signal: {device.rssi} dBm")
         
         scanner = BleakScanner(detection_callback=detection_callback)
         
@@ -47,15 +50,16 @@ class BLETargetFinder:
     async def find_strongest_direction(self, motion_controller, num_rotations=8):
         """
         旋转机器人,找到信号最强的方向
+        在人圈内原地转
         
-        参数:
+        args:
             motion_controller: MotionController实例
-            num_rotations: 分成多少个方向扫描
+            num_rotations: 分成多少个方向扫描 = 多少个人
         
-        返回:
+        return:
             best_direction: 0 到 num_rotations-1
         """
-        print(f"\n🔄 Rotating to find strongest signal...")
+        print(f"\n Rotating to find strongest signal...")
         
         rotation_step = 360 / num_rotations  # 每次旋转角度
         rotation_time = rotation_step / 360 * 2.0  # 假设转一圈需要2秒
