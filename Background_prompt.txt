@@ -1,0 +1,3 @@
+项目：一个FollowBot项目，通过raspberry pi 5和STM32控制逻辑与移动。基本功能为：待机状态/检测到BLE tag active时，在周围四个方向通过感应最强的蓝牙信号源来确认tag的方向来锁定拿tag的人。锁定后通过人脸识别进入跟随模式，自动避障。
+
+材料：raspberry pi 5, TB6612, TT motor, Wheels, Rear Caster, HC-SR04 sensor, MPU-6050, xiao ESP32 as BLE tag, 5″ TFT / HDMI Display, microphone, speaker, 3S Lipo Battery 2200mAh 11.1V 50C, XL4016 DC-DC buck converter, Motor Mount Brackets, Standoffs + Screws Assortment, Arducam for Raspberry Pi Camera Module 3, Raspberry Pi 5 active cooler, E3 35W 3Amp LiPO Battery Balance Charger, Micro HDMI to HDMI Display Cable, Micro SDXC Memory Card 128GB, XT60 Connector Plug Cable with Plug and Socket Pigtail Leads, USB Type-C pigtail, STM32F401RE (Nucleo Board)，以及开关，杜邦线，数据线等等。
