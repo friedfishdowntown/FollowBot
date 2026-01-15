@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,12 +43,18 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 float dist = 0;
 uint8_t rx_data; // 存放接收到的 1 个字符
+#define RX_BUFFER_SIZE 64
+uint8_t rx_byte;
+uint8_t rx_buffer[RX_BUFFER_SIZE];
+uint8_t rx_index = 0;
+#define MAX_PWM 1000
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -54,32 +62,31 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#include "stdio.h" // 如果你想以后用 printf
 #ifdef __GNUC__
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #else
 #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #endif
-
 PUTCHAR_PROTOTYPE
 {
   HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
   return ch;
 }
-// 简单的微秒延时函数
+
 void delay_us (uint16_t us)
 {
-	__HAL_TIM_SET_COUNTER(&htim1, 0);  // 清零计数器
-	while (__HAL_TIM_GET_COUNTER(&htim1) < us);  // 等待计数达到 us
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	while (__HAL_TIM_GET_COUNTER(&htim1) < us);
 }
 
-// 读取距离函数 (返回单位: cm)
+// HCSR04读取距离函数 (已调整，现sensor已精准)
 float HCSR04_Read (void)
 {
 	uint32_t local_time = 0;
@@ -119,6 +126,39 @@ float HCSR04_Read (void)
 
 	return distance;
 }
+// MotorControl--TB6612电机控制函数
+// 逻辑: 左轮(AIN1/AIN2 + TIM3_CH1), 右轮(BIN1/BIN2 + TIM3_CH2)
+// 引脚: AIN1=PB4, AIN2=PB5, BIN1=PB0, BIN2=PB1
+void Motor_Control(int left_speed, int right_speed)
+{
+    // 1. 限制 PWM 范围
+    if (left_speed > MAX_PWM) left_speed = MAX_PWM;
+    if (left_speed < -MAX_PWM) left_speed = -MAX_PWM;
+    if (right_speed > MAX_PWM) right_speed = MAX_PWM;
+    if (right_speed < -MAX_PWM) right_speed = -MAX_PWM;
+
+    // 2. 左轮控制
+    if (left_speed >= 0) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // AIN1 High
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET); // AIN2 Low
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, left_speed);
+    } else {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // AIN1 Low
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);   // AIN2 High
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, -left_speed); // 取绝对值
+    }
+
+    // 3. 右轮控制
+    if (right_speed >= 0) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);   // BIN1 High
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET); // BIN2 Low
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, right_speed);
+    } else {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, -right_speed);
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -152,9 +192,13 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_USART2_UART_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start(&htim1); // 启动定时器！非常重要，否则延时函数无效
+  HAL_TIM_Base_Start(&htim1);
   HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -165,12 +209,13 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	      dist = HCSR04_Read();
-	      printf("Distance: %.2f cm\r\n", dist);
+	      printf("Distance: %.2f\r\n", dist);
 
 	      HAL_Delay(100);
 	      // 简单的避障逻辑测试
-	      if (dist > 0 && dist < 15.0) // 如果距离小于 15cm
+	      if (dist > 0 && dist < 10.0) // 如果距离小于 15cm
 	      {
+	    	  Motor_Control(0, 0);
 	          HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // 点亮板载 LED (PC13通常是低电平亮)
 	      }
 	      else
@@ -178,7 +223,7 @@ int main(void)
 	          HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);   // 熄灭 LED
 	      }
 
-	      HAL_Delay(100); // 稍微延时，不要测得太频繁
+	      HAL_Delay(50); // 稍微延时，不要测得太频繁
 	  }
   /* USER CODE END 3 */
 }
@@ -276,6 +321,69 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 83;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 1000;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -321,10 +429,25 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(STBY_GPIO_Port, STBY_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, BIN1_Pin|BIN2_Pin|AIN1_Pin|AIN2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : STBY_Pin */
+  GPIO_InitStruct.Pin = STBY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(STBY_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
@@ -332,6 +455,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BIN1_Pin BIN2_Pin AIN1_Pin AIN2_Pin */
+  GPIO_InitStruct.Pin = BIN1_Pin|BIN2_Pin|AIN1_Pin|AIN2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA10 */
   GPIO_InitStruct.Pin = GPIO_PIN_10;
@@ -348,26 +478,31 @@ static void MX_GPIO_Init(void)
 // 每次收到数据，系统会自动调用这个函数
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if (huart->Instance == USART2)
-  {
-    // 根据收到的字符控制电机 (假设你有 Motor_Control 函数)
-    switch(rx_data) {
-        case 'w': // 前进
-            Motor_Control(600, 600);
-            break;
-        case 's': // 停止
-            Motor_Control(0, 0);
-            break;
-        case 'a': // 左转 (左轮反转，右轮正转)
-            Motor_Control(-500, 500);
-            break;
-        case 'd': // 右转
-            Motor_Control(500, -500);
-            break;
-    }
-    // 继续监听下一个字符
-    HAL_UART_Receive_IT(&huart2, &rx_data, 1);
-  }
+	if (huart->Instance == USART2)
+	  {
+	    // 收到换行符，说明一条指令结束
+	    if (rx_byte == '\n' || rx_index >= RX_BUFFER_SIZE - 1)
+	    {
+	        rx_buffer[rx_index] = '\0'; // 封口
+
+	        // 解析指令 "L:300,R:-300"
+	        int l_val = 0, r_val = 0;
+	        if (strstr((char*)rx_buffer, "L:") && strstr((char*)rx_buffer, "R:"))
+	        {
+	            sscanf((char*)rx_buffer, "L:%d,R:%d", &l_val, &r_val);
+	            Motor_Control(l_val, r_val);
+	        }
+
+	        rx_index = 0; // 清空索引
+	    }
+	    else
+	    {
+	        rx_buffer[rx_index++] = rx_byte; // 存入缓冲区
+	    }
+
+	    // 继续监听下一个字节
+	    HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+	  }
 }
 /* USER CODE END 4 */
 
